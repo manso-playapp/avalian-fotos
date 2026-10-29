@@ -1,0 +1,564 @@
+<meta charset="utf-8">
+<title>Avalian Pasador de Fotos</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* =====================================================================
+   AVALIAN · PASADOR DE FOTOS (pantalla 1344 × 840)
+   Layout: escenario arriba, tira de miniaturas y controles abajo.
+   Look único oscuro (herramienta de operación en vivo).
+   ===================================================================== */
+:root{
+  color-scheme: dark;
+  --bg:#06140f; --panel:#0b1f18; --line:#1b3a2e; --fg:#e8f5ec; --muted:#8aa99a;
+  --brand:#00996b; --brand-l:#8bdc65; --deep:#01291f;
+  --font:"Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --fade:1.2s;           /* duración del fundido entre fotos */
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;margin:0;
+  padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px));padding-block:0;box-sizing:border-box}
+*{box-sizing:border-box}
+.app{max-width:1400px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding-block:14px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:12px}
+header h1{font-size:15px;font-weight:600;margin:0}
+.spec{font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+.spec b{color:var(--brand-l);font-weight:500}
+
+/* ---------- Escenario ---------- */
+/* 16:10 siempre, limitado por el alto de la ventana para que nunca se corte */
+.stage{position:relative;width:min(100%, calc((100dvh - 250px) * 1.6));margin-inline:auto;max-width:100%;aspect-ratio:1344/840;background:#000;overflow:hidden;border-radius:6px;box-shadow:0 0 0 1px var(--line)}
+.stage:fullscreen{border-radius:0;box-shadow:none;aspect-ratio:auto;width:100vw;height:100vh;margin:0;display:grid;place-items:center}
+.stage:fullscreen .canvas{width:min(100vw, calc(100vh * 1.6));height:min(100vh, calc(100vw / 1.6))}
+.stage:fullscreen.idle{cursor:none}
+.canvas{position:absolute;inset:0;margin:auto;overflow:hidden;container-type:size}
+.stage:fullscreen .canvas{position:relative}
+/* Cada diapositiva es una capa; la activa se funde encima */
+.slide{position:absolute;inset:0;opacity:0;transition:opacity var(--fade) ease}
+.slide.on{opacity:1}
+/* Rotación leve por foto: gira y agranda lo justo para que no aparezcan esquinas vacías */
+.slide .rot{position:absolute;inset:0;transform:rotate(var(--rot,0deg)) scale(var(--rs,1));transition:transform .6s ease}
+.slide img.main{width:100%;height:100%;object-fit:cover;display:block;transform-origin:var(--ox,50%) var(--oy,50%)}
+/* Fotos agregadas en el momento: entera + fondo desenfocado */
+.slide.fit img.main{object-fit:contain;position:absolute;inset:4%;width:92%;height:92%}
+.slide.fit .blur{position:absolute;inset:-40px;background-size:cover;background-position:center;filter:blur(36px) brightness(.5)}
+.slide.fit .blur::after{content:"";position:absolute;inset:0;background:rgba(1,41,31,.45)}
+/* Movimiento lento (Ken Burns): alterna acercar / alejar */
+@keyframes kbIn{from{transform:scale(1)}to{transform:scale(1.04)}}
+@keyframes kbOut{from{transform:scale(1.04)}to{transform:scale(1)}}
+.slide.on.kb-in img.main{animation:kbIn var(--kb,14s) ease-out forwards}
+.slide.on.kb-out img.main{animation:kbOut var(--kb,14s) ease-out forwards}
+/* Placas de apertura / cierre */
+.plate{display:grid;place-items:center;background:radial-gradient(ellipse at 50% 50%, #00996b 0%, #015a40 55%, #01291f 100%)}
+.plate svg{width:52%;height:auto;max-height:40%}
+/* Logo chico en esquina */
+.bug{position:absolute;right:3.2%;bottom:4.5%;width:13%;height:auto;max-height:9%;opacity:.92;transition:opacity .6s;filter:drop-shadow(0 2px 10px rgba(0,0,0,.45));pointer-events:none}
+.bug.off{opacity:0}
+/* Negro (cortina) */
+.black{position:absolute;inset:0;background:#000;opacity:0;transition:opacity .8s;pointer-events:none}
+.black.on{opacity:1}
+.hud{position:absolute;left:12px;top:12px;font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.55);padding:4px 8px;border-radius:4px;display:flex;gap:10px}
+.stage:fullscreen .hud{display:none}
+
+/* ---------- Controles ---------- */
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{background:var(--panel);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:9px 12px;font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn[aria-pressed="true"]{background:var(--brand);border-color:var(--brand)}
+.btn:focus-visible,.thumb:focus-visible{outline:2px solid var(--brand-l);outline-offset:2px}
+.sep{flex:1 1 auto}
+.ctl{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.ctl output{font-family:var(--mono);color:var(--fg);min-width:3.5em}
+input[type=range]{accent-color:var(--brand-l);width:120px}
+.strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.thumb{flex:0 0 auto;width:128px;aspect-ratio:1344/840;border:2px solid transparent;border-radius:4px;padding:0;background:#000;cursor:pointer;position:relative;overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb span{position:absolute;left:4px;top:3px;font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.6);padding:1px 4px;border-radius:2px;color:#fff}
+.thumb[aria-current="true"]{border-color:var(--brand-l)}
+.thumb[draggable="true"]{cursor:grab}
+.thumb.dragging{opacity:.35}
+.thumb.drop-before{box-shadow:-4px 0 0 0 var(--brand-l)}
+.thumb.drop-after{box-shadow:4px 0 0 0 var(--brand-l)}
+.thumb.plateT{background:radial-gradient(#00996b,#01291f);display:grid;place-items:center}
+.thumb.plateT svg{width:60%}
+.add{flex:0 0 auto;width:128px;aspect-ratio:1344/840;border:1px dashed var(--line);border-radius:4px;display:grid;place-items:center;color:var(--muted);font-size:12px;text-align:center;cursor:pointer;padding:6px}
+.add input{display:none}
+.keys{font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:3px;padding:1px 5px;color:var(--fg)}
+.msg{font-size:12px;color:var(--brand-l);min-height:1em}
+/* ---------- Renderizador ---------- */
+.render{border:1px solid var(--line);border-radius:6px;padding:14px;display:grid;gap:12px;background:var(--panel)}
+.render h2{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--brand-l)}
+.render .row{display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+.render label.chk{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.prog{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:var(--brand-l);transition:width .2s}
+.note{font-size:12px;color:var(--muted);margin:0;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ .slide.on img.main{animation:none!important} }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Avalian · Pasador de fotos</h1>
+    <div class="spec"><span>Pantalla <b>1344 × 840</b></span><span>Foto <b id="pos">0 / 0</b></span></div>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="canvas" id="canvas">
+      <!-- las diapositivas se insertan por script -->
+      <svg class="bug" id="bug" viewBox="270 355 1375 375" aria-hidden="true"></svg>
+      <div class="black" id="black"></div>
+    </div>
+    <div class="hud" id="hud"><span id="hudPos"></span><span id="hudMode">Manual</span></div>
+  </div>
+
+  <div class="bar">
+    <button class="btn" id="prev" type="button">← Anterior</button>
+    <button class="btn primary" id="next" type="button">Siguiente →</button>
+    <button class="btn" id="auto" type="button" aria-pressed="false">Automático</button>
+    <div class="ctl"><label for="secs">Cada</label><input type="range" id="secs" min="3" max="15" step="1" value="7"><output id="secsOut">7 s</output></div>
+    <div class="ctl"><label for="rotMax">Rotación</label><input type="range" id="rotMax" min="0" max="6" step="0.5" value="2.5"><output id="rotOut">2.5°</output></div>
+    <button class="btn" id="resetOrder" type="button" title="Volver al orden original de las fotos">Orden original</button>
+    <button class="btn" id="rotShuffle" type="button" title="Sortear de nuevo hacia qué lado gira cada foto">Sortear lados</button>
+    <span class="sep"></span>
+    <button class="btn" id="logoBtn" type="button" aria-pressed="true">Logo en esquina</button>
+    <button class="btn" id="blackBtn" type="button" aria-pressed="false">Negro</button>
+    <button class="btn" id="full" type="button">Pantalla completa</button>
+  </div>
+
+  <div class="strip" id="strip"></div>
+  <div class="keys"><span><kbd>→</kbd> <kbd>Espacio</kbd> <kbd>PgDn</kbd> siguiente</span><span><kbd>←</kbd> <kbd>PgUp</kbd> anterior</span><span><kbd>A</kbd> automático</span><span><kbd>F</kbd> pantalla completa</span><span><kbd>L</kbd> logo</span><span><kbd>B</kbd> negro</span><span><kbd>Inicio</kbd> <kbd>Fin</kbd> placas</span><span>Arrastrá las miniaturas para reordenar</span></div>
+  <div class="msg" id="msg" role="status"></div>
+
+  <section class="render" aria-labelledby="rTitle">
+    <h2 id="rTitle">Renderizar video</h2>
+    <div class="row">
+      <div class="ctl"><label for="rSecs">Segundos por foto</label><input type="range" id="rSecs" min="3" max="12" step="0.5" value="6"><output id="rSecsOut">6 s</output></div>
+      <div class="ctl"><label for="rFade">Fundido</label><input type="range" id="rFade" min="0.4" max="2.5" step="0.1" value="1.2"><output id="rFadeOut">1.2 s</output></div>
+      <div class="ctl"><label for="rPlate">Placas</label><input type="range" id="rPlate" min="2" max="8" step="0.5" value="4"><output id="rPlateOut">4 s</output></div>
+      <label class="chk"><input type="checkbox" id="rPlates" checked> Apertura y cierre</label>
+      <label class="chk"><input type="checkbox" id="rLogo" checked> Logo en esquina</label>
+      <label class="chk"><input type="checkbox" id="rKB" checked> Acercamiento lento</label>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="rBtn" type="button">Renderizar MP4</button>
+      <span class="note" id="rInfo"></span>
+    </div>
+    <div class="prog" aria-hidden="true"><i id="rBar"></i></div>
+    <p class="note">MP4 H.264 a 1344 × 840, 30 fps, con las fotos en el orden de la tira (incluye las que agregues). En Chrome o Safari se renderiza más rápido que en tiempo real; si el navegador no lo soporta, graba en tiempo real.</p>
+  </section>
+</div>
+
+<!-- Empaquetador MP4 para el renderizador (WebCodecs → .mp4) -->
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js"></script>
+<script>
+/* =====================================================================
+   1. LOGO (paths originales del SVG de Avalian) en versión NEGATIVO:
+   todo blanco con filete calado entre triángulo y arco (máscara).
+   ===================================================================== */
+const PATHS = {"top": "M500.96,373.42c-10.16-15.71-33.14-15.7-43.29,0l-170.84,264.35v-.02c65.97-61.33,154.38-98.85,251.55-98.85,25.52,0,50.44,2.590,74.51,7.52L500.96,373.42Z", "arc": "M286.85,637.75l-1.47,2.24c-13.75,21,7.58,47.33,30.93,38.12,50.62-19.97,105.82-37.82,163.56-37.82s112.29,18.16,162.68,38.18c23.37,9.28,44.9-16.81,31.24-37.92l-60.9-94.13c-24.06-4.93-48.98-7.52-74.51-7.52C441.21,538.9,352.8,576.42,286.85,637.75", "word": "M814.12,572.61c22.89,0,37.67-15.07,37.67-37.09v-6.09h-33.9q-29.56,0-29.56,21.74C788.33,564.78,797.890,572.61,814.12,572.61M810.64,505.96h41.15v-10.43c0-17.68-10.14-26.66-30.14-26.66-17.16,0-28.12,7.94-29.66,20.38-.21,1.75-1.66,3.09-3.430,3.09h-28c-2.08,0-3.69-1.84-3.41-3.9,4.05-29.79,29.32-47.1,67.11-47.1,41.73,0,63.46,21.15,63.46,57.37v95.67c0,1.9-1.54,3.44-3.44,3.44h-25.39c-1.74,0-3.2-1.29-3.42-3.02l-2.81-22.48h-2.32c-6.95,18.55-25.21,28.4-48.1,28.4-30.43,0-50.42-18.26-50.42-46.37C751.82,523.35,774.42,505.96,810.64,505.96M897.18,444.24h31.71c1.52,0,2.86.99,3.3,2.45l20.7,68.83,14.2,49.27h1.74l13.62-48.98,20.71-69.12c.44-1.46,1.78-2.45,3.3-2.45h31.72c2.37,0,4.03,2.33,3.26,4.57l-50.65,146.69c-.48,1.39-1.79,2.32-3.26,2.32h-39.15c-1.46,0-2.77-.93-3.25-2.31l-51.2-146.69C893.15,446.58,894.81,444.24,897.18,444.24M1103.73,572.61c22.89,0,37.67-15.07,37.67-37.09v-6.09h-33.91q-29.55,0-29.55,21.74C1077.94,564.78,1087.5,572.61,1103.73,572.61M1100.25,505.96h41.15v-10.43c0-17.68-10.14-26.66-30.14-26.66-17.16,0-28.12,7.94-29.66,20.38-.22,1.75-1.66,3.09-3.43,3.09h-28c-2.08,0-3.7-1.84-3.42-3.9,4.06-29.79,29.33-47.1,67.12-47.1,41.73,0,63.46,21.15,63.46,57.37v95.67c0,1.9-1.54,3.44-3.45,3.44h-25.38c-1.74,0-3.21-1.29-3.42-3.02l-2.81-22.48h-2.32c-6.96,18.55-25.21,28.4-48.11,28.4-30.42,0-50.42-18.26-50.42-46.37C1041.42,523.35,1064.03,505.96,1100.25,505.96M1206.95,594.38v-203.62c0-1.9,1.54-3.44,3.44-3.44h28.75c1.91,0,3.45,1.54,3.45,3.44v203.62c0,1.9-1.54,3.44-3.45,3.44h-28.75C1208.49,597.82,1206.95,596.28,1206.95,594.38M1273.33,594.38v-146.7c0-1.9,1.55-3.45,3.45-3.45h28.75c1.9,0,3.45,1.55,3.45,3.45v146.7c0,1.9-1.55,3.44-3.45,3.44h-28.75C1274.88,597.82,1273.33,596.28,1273.33,594.38M1393.65,572.61c22.9,0,37.67-15.07,37.67-37.09v-6.09h-33.9q-29.56,0-29.56,21.74C1367.86,564.78,1377.42,572.61,1393.65,572.61M1390.18,505.96h41.14v-10.43c0-17.68-10.14-26.66-30.13-26.66-17.16,0-28.12,7.94-29.66,20.38-.22,1.75-1.66,3.09-3.43,3.09h-28c-2.08,0-3.7-1.84-3.42-3.9,4.06-29.79,29.33-47.1,67.11-47.1,41.73,0,63.47,21.15,63.47,57.37v95.67c0,1.9-1.55,3.44-3.45,3.44h-25.39c-1.73,0-3.2-1.29-3.42-3.02l-2.81-22.48h-2.31c-6.96,18.55-25.22,28.4-48.11,28.4-30.43,0-50.42-18.26-50.42-46.37C1331.35,523.35,1353.95,505.96,1390.18,505.96M1496.67,594.38v-146.7c0-1.9,1.54-3.45,3.44-3.45h25.19c1.7,0,3.15,1.25,3.4,2.93l3.9,25.47h2.32c9.56-19.99,28.11-31.29,51-31.29,34.49,0,53.03,24.34,53.03,63.46v89.58c0,1.9-1.54,3.44-3.44,3.44h-29.33c-1.91,0-3.45-1.54-3.45-3.440v-85.81c0-24.64-10.43-36.81-31.59-36.81-23.47,0-38.54,18.26-38.54,45.21v77.41c0,1.9-1.54,3.44-3.44,3.44h-29.05C1498.21,597.82,1496.67,596.28,1496.67,594.38M1291.16,387.32c11.13,0,20.15,9.02,20.15,20.15s-9.02,20.15-20.15,20.15-20.16-9.02-20.16-20.15S1280.03,387.32,1291.16,387.32H1291.16", "tag": "M942.08,705.03c-.47,4.01-2.29,7.24-5.41,9.68-3.08,2.45-6.88,3.65-11.41,3.65q-8.28,0-13.27-5.31c-3.28-3.6-4.95-8.28-4.95-14.17s1.67-10.51,5-14.1c3.33-3.6,7.76-5.37,13.22-5.37q6.8,0,11.41,3.59c3.07,2.4,4.84,5.63,5.41,9.64h-7.08c-1.09-4.53-4.84-7.19-9.79-7.19-3.38,0-6.040,1.2-8.02,3.65q-2.96,3.67-2.96,9.84c0,8.38,4.16,13.38,10.88,13.38,5.26,0,8.9-2.87,9.89-7.29H942.08ZM966,712.26c-6.66,0-10.93-5.1-10.93-13.43,0-4.06.99-7.29,2.91-9.73,1.98-2.45,4.64-3.65,8.02-3.65s5.99,1.2,7.97,3.65c2.03,2.39,3.02,5.67,3.02,9.78C976.99,707.01,972.87,712.26,966,712.26M952.83,684.67c-3.28,3.49-4.95,8.23-4.95,14.21s1.62,10.57,4.84,14.17q4.92,5.31,13.28,5.31c5.52,0,9.94-1.77,13.22-5.26,3.29-3.49,4.95-8.28,4.95-14.27s-1.61-10.52-4.89-14.05c-3.23-3.6-7.66-5.37-13.28-5.37S956.11,681.18,952.83,684.67M998.93,701.07h10.05c3.8,0,6.46,1.77,6.46,5.68,0,3.69-2.5,5.72-6.46,5.72h-10.05V701.07ZM998.93,685.19h9.84c3.54,0,5.84,1.98,5.84,5.26s-2.24,5.36-5.84,5.36h-9.84V685.19ZM1010.44,717.84c3.7,0,6.67-.94,8.85-2.82,2.24-1.92,3.33-4.42,3.33-7.6,0-4.37-2.18-7.7-6.4-8.95v-.47c3.38-1.3,5.41-4.48,5.41-8.49,0-5.78-4.32-9.63-11.19-9.63h-18.17v37.96H1010.44ZM1057.12,717.84v-5.99h-19.36v-10.83h16.76v-5.62h-16.76v-9.53h19.36v-5.99h-26.13v37.96H1057.12ZM1072.39,685.82h9.27q6.56,0,6.56,5.93c0,3.8-2.66,6.25-7.08,6.25h-8.75V685.82ZM1072.39,717.84v-13.91h10c4.11,0,5.46,1.67,5.46,5.37v3.96c0,2.24.21,3.8.58,4.58h6.97c-.36-.94-.57-2.4-.57-4.38v-5.31c0-4.06-1.77-6.51-5.31-7.39v-.36c3.7-1.72,5.94-5.11,5.94-9.43,0-6.87-4.22-11.09-11.98-11.09h-17.86v37.96H1072.39ZM1100.91,679.88v6.04h10.99v31.92h6.82v-31.92h11.04v-6.04H1100.91ZM1135.98,703.52c0,9.11,5.62,14.84,15.82,14.84,4.9,0,8.75-1.3,11.62-3.96,2.86-2.65,4.32-6.3,4.32-10.88v-23.64h-6.77v23.12c0,5.83-3.49,9.21-9.11,9.21s-9.11-3.43-9.11-9.21v-23.12h-6.77V703.52ZM1184.47,685.82h9.27q6.56,0,6.56,5.93c0,3.8-2.66,6.25-7.08,6.25h-8.75V685.82ZM1184.47,717.84v-13.91h10c4.11,0,5.46,1.67,5.46,5.37v3.96c0,2.24.21,3.8.58,4.58h6.97c-.36-.94-.57-2.4-.57-4.38v-5.31c0-4.06-1.77-6.51-5.31-7.39v-.36c3.7-1.72,5.94-5.11,5.94-9.43,0-6.87-4.22-11.09-11.98-11.09h-17.86v37.96H1184.47ZM1226.74,699.61l4.16-12.65h.31l4.01,12.65,1.82,5.26h-12.18L1226.74,699.61ZM1249.02,717.84l-14.11-37.96h-7.910l-13.8,37.96h7.08l2.71-7.6h15.93l2.65,7.6H1249.02ZM1277.65,717.84v-17.86l-.47-10.83h.36l12.71,28.06,12.7-28.06h.32l-.47,10.78v17.91h6.66v-37.96h-8.69l-10.36,23.9h-.37l-10.36-23.9h-8.7v37.96H1277.65ZM1343.3,671.45l-2.76-4.64-10.26,7.71,1.98,3.17L1343.3,671.45ZM1345.85,717.84v-5.99h-19.37v-10.83h16.77v-5.62h-16.77v-9.53h19.37v-5.99h-26.14v37.96H1345.85ZM1361.12,685.87h7.6c6.82,0,10.88,4.16,10.88,12.91s-4.01,13.07-10.88,13.07h-7.6V685.87ZM1369.6,717.84q8.13,0,12.65-5.16c3.02-3.43,4.54-8.02,4.54-13.8s-1.52-10.36-4.54-13.79c-2.96-3.49-7.18-5.21-12.65-5.21h-15.25v37.96H1369.6ZM1401.72,679.88h-6.76v37.96h6.76V679.88ZM1437.74,705.03c-.99,4.42-4.63,7.29-9.89,7.29-6.72,0-10.88-5-10.88-13.38q0-6.17,2.96-9.84c1.98-2.45,4.64-3.65,8.02-3.65,4.95,0,8.7,2.66,9.79,7.19h7.08c-.57-4.01-2.34-7.24-5.41-9.64q-4.61-3.59-11.41-3.59c-5.46,0-9.89,1.77-13.22,5.37-3.33,3.59-5,8.27-5,14.1s1.67,10.57,4.95,14.17q4.99,5.31,13.27,5.31c4.53,0,8.33-1.2,11.410-3.65,3.12-2.44,4.94-5.67,5.41-9.68H1437.74ZM1461.44,699.61l4.17-12.65h.31l4.01,12.65,1.82,5.26h-12.18L1461.44,699.61ZM1483.73,717.84l-14.11-37.96h-7.92l-13.79,37.96h7.08l2.7-7.6h15.94l2.65,7.6H1483.73Z"};
+function logoSVG(withText=true, idp='m'){
+  return `<defs><mask id="${idp}" maskUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1080">
+      <rect width="1920" height="1080" fill="#fff"/>
+      <path d="${PATHS.arc}" fill="#000" stroke="#000" stroke-width="26" stroke-linejoin="round"/></mask></defs>
+    <path d="${PATHS.top}" fill="#fff" mask="url(#${idp})"/>
+    <path d="${PATHS.arc}" fill="#fff"/>
+    ${withText?`<path d="${PATHS.word}" fill="#fff"/><path d="${PATHS.tag}" fill="#fff"/>`:''}`;
+}
+document.getElementById('bug').innerHTML = logoSVG(true,'mBug');
+
+/* =====================================================================
+   2. LISTA DE DIAPOSITIVAS
+   'plate' = placa de marca (apertura / cierre); 'photo' = foto reencuadrada.
+   ox/oy = punto desde donde se hace el acercamiento lento.
+   ===================================================================== */
+/* 1–30: fotos personales (carpeta Mozzi), copia impresa entera.
+   31–40: etapa Avalian (raíz de "25 años"). */
+const PHOTOS = [
+  {src:'fotos/avalian_25_01.jpg?v=5'},
+  {src:'fotos/avalian_25_02.jpg?v=5'},
+  {src:'fotos/avalian_25_03.jpg?v=5'},
+  {src:'fotos/avalian_25_04.jpg?v=5'},
+  {src:'fotos/avalian_25_05.jpg?v=5'},
+  {src:'fotos/avalian_25_06.jpg?v=5'},
+  {src:'fotos/avalian_25_07.jpg?v=5'},
+  {src:'fotos/avalian_25_08.jpg?v=5'},
+  {src:'fotos/avalian_25_09.jpg?v=5'},
+  {src:'fotos/avalian_25_10.jpg?v=5'},
+  {src:'fotos/avalian_25_11.jpg?v=5'},
+  {src:'fotos/avalian_25_12.jpg?v=5'},
+  {src:'fotos/avalian_25_13.jpg?v=5'},
+  {src:'fotos/avalian_25_14.jpg?v=5'},
+  {src:'fotos/avalian_25_15.jpg?v=5'},
+  {src:'fotos/avalian_25_16.jpg?v=5'},
+  {src:'fotos/avalian_25_17.jpg?v=5'},
+  {src:'fotos/avalian_25_18.jpg?v=5'},
+  {src:'fotos/avalian_25_19.jpg?v=5'},
+  {src:'fotos/avalian_25_20.jpg?v=5'},
+  {src:'fotos/avalian_25_21.jpg?v=5'},
+  {src:'fotos/avalian_25_22.jpg?v=5'},
+  {src:'fotos/avalian_25_23.jpg?v=5'},
+  {src:'fotos/avalian_25_24.jpg?v=5'},
+  {src:'fotos/avalian_25_25.jpg?v=5'},
+  {src:'fotos/avalian_25_26.jpg?v=5'},
+  {src:'fotos/avalian_25_27.jpg?v=5'},
+  {src:'fotos/avalian_25_28.jpg?v=5'},
+  {src:'fotos/avalian_25_29.jpg?v=5'},
+  {src:'fotos/avalian_25_30.jpg?v=5'},
+  {src:'fotos/avalian_25_31.jpg?v=5', note:'InterAca San Bernardo 2001'},
+  {src:'fotos/avalian_25_32.jpg?v=5', note:'1° InterAca'},
+  {src:'fotos/avalian_25_33.jpg?v=5'},
+  {src:'fotos/avalian_25_34.jpg?v=5', oy:'40%'},
+  {src:'fotos/avalian_25_35.jpg?v=5', oy:'35%'},
+  {src:'fotos/avalian_25_36.jpg?v=5', oy:'40%'},
+  {src:'fotos/avalian_25_37.jpg?v=5', oy:'45%'},
+  {src:'fotos/avalian_25_38.jpg?v=5', oy:'40%'},
+  {src:'fotos/avalian_25_39.jpg?v=5'},
+  {src:'fotos/avalian_25_40.jpg?v=5', oy:'45%'}
+];
+let slides = [ {type:'plate'}, ...PHOTOS.map(p=>({type:'photo',...p})), {type:'plate'} ];
+
+const $=id=>document.getElementById(id);
+const canvas=$('canvas'), strip=$('strip');
+
+/* ---------- Rotación aleatoria por foto ----------
+   Cada foto recibe un lado (+1 / -1) y un factor 0,6–1 sorteados; el ángulo = lado × factor × máximo.
+   El escalado compensa la rotación para cubrir el cuadro 16:10 sin esquinas vacías. */
+let rotSeed=Date.now()%100000;
+function rng(seed){ return ()=>{ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function rotOf(i){
+  const s=slides[i]; if(!s || s.type==='plate') return {deg:0, scale:1};
+  let h=0; for(const ch of (s.src||'')) h=(h*31+ch.charCodeAt(0))|0;   // semilla por foto
+  const R=rng(rotSeed+h); const side=R()<.5?-1:1, f=.6+.4*R();
+  const deg=side*f*(+$('rotMax').value), rad=Math.abs(deg)*Math.PI/180;
+  return {deg, scale:Math.cos(rad)+1.6*Math.sin(rad)};      // 1.6 = 1344/840
+}
+function applyRot(){ slides.forEach((s,i)=>{ if(!s.el) return; const r=rotOf(i); s.el.style.setProperty('--rot',r.deg+'deg'); s.el.style.setProperty('--rs',r.scale); }); }
+let cur=0, autoOn=false, timer=null, kbFlip=false;
+
+/* ---------- Reordenar por arrastre ----------
+   Mueve la diapositiva 'from' a la posición 'to' (índice de inserción), sin pasar por encima de las placas.
+   El orden se recuerda en este navegador. */
+let dragFrom=-1;
+const clearMarks=()=>strip.querySelectorAll('.drop-before,.drop-after').forEach(n=>n.classList.remove('drop-before','drop-after'));
+function moveSlide(from,to,keepFocus=false){
+  if(from<0||!slides[from]||slides[from].type!=='photo') return;
+  const firstPhoto=slides.findIndex(s=>s.type==='photo'), lastSlot=slides.length-(slides[slides.length-1].type==='plate'?1:0);
+  to=Math.max(firstPhoto,Math.min(lastSlot,to));
+  const curSlide=slides[cur], item=slides.splice(from,1)[0];
+  if(to>from) to--;
+  slides.splice(to,0,item);
+  cur=slides.indexOf(curSlide);
+  saveOrder(); build(); updInfo();
+  if(keepFocus) item.th.focus();
+  msg('Orden actualizado.');
+}
+const ORDER_KEY='avalian-pasador-orden';
+function saveOrder(){ try{ localStorage.setItem(ORDER_KEY, JSON.stringify(slides.filter(s=>s.type==='photo'&&!s.fit).map(s=>s.src))); }catch(e){} }
+function loadOrder(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(ORDER_KEY)||'null'); if(!Array.isArray(saved)) return;
+    const photos=slides.filter(s=>s.type==='photo'), bySrc=new Map(photos.map(p=>[p.src,p]));
+    const ordered=saved.map(src=>bySrc.get(src)).filter(Boolean);
+    photos.forEach(p=>{ if(!ordered.includes(p)) ordered.push(p); });   // fotos nuevas al final
+    slides=[slides[0],...ordered,slides[slides.length-1]];
+  }catch(e){}
+}
+function resetOrder(){ try{ localStorage.removeItem(ORDER_KEY); }catch(e){}
+  slides=[ {type:'plate'}, ...PHOTOS.map(p=>({type:'photo',...p})), ...slides.filter(s=>s.fit), {type:'plate'} ];
+  cur=0; build(); updInfo(); msg('Orden original restablecido.'); }
+
+/* Construye capas del escenario y miniaturas */
+function build(){
+  canvas.querySelectorAll('.slide').forEach(n=>n.remove());
+  strip.innerHTML='';
+  slides.forEach((s,i)=>{
+    const d=document.createElement('div');
+    d.className='slide'+(s.type==='plate'?' plate':'')+(s.fit?' fit':'');
+    if(s.type==='plate') d.innerHTML=`<svg viewBox="270 355 1375 375" aria-label="Avalian">${logoSVG(true,'mP'+i)}</svg>`;
+    else {
+      d.innerHTML=`<div class="rot">`+(s.fit?`<div class="blur" style="background-image:url('${s.src}')"></div>`:'')+`<img class="main" src="${s.src}" alt="${s.note||'Foto '+i}" decoding="async"></div>`;
+      d.style.setProperty('--ox',s.ox||'50%'); d.style.setProperty('--oy',s.oy||'50%');
+    }
+    canvas.insertBefore(d,$('bug'));
+    s.el=d;
+    // Miniatura
+    const t=document.createElement('button'); t.type='button'; t.className='thumb'+(s.type==='plate'?' plateT':'');
+    t.innerHTML = s.type==='plate' ? `<svg viewBox="280 360 370 325">${logoSVG(false,'mT'+i)}</svg><span>${i===0?'Apertura':'Cierre'}</span>` : `<img src="${s.src}" alt=""><span>${i}</span>`;
+    t.onclick=()=>go(i);
+    if(s.type==='photo'){
+      t.draggable=true; t.title='Arrastrá para cambiar el orden (o Alt + ← / →)';
+      t.addEventListener('dragstart',e=>{ dragFrom=i; t.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(i)); });
+      t.addEventListener('dragend',()=>{ t.classList.remove('dragging'); clearMarks(); });
+      t.addEventListener('dragover',e=>{ if(dragFrom<0) return; e.preventDefault(); clearMarks();
+        const after=e.offsetX>t.clientWidth/2; t.classList.add(after?'drop-after':'drop-before'); });
+      t.addEventListener('drop',e=>{ e.preventDefault(); const after=e.offsetX>t.clientWidth/2; moveSlide(dragFrom, after?i+1:i); dragFrom=-1; });
+      t.addEventListener('keydown',e=>{ if(!e.altKey) return;
+        if(e.key==='ArrowLeft'){ e.preventDefault(); e.stopPropagation(); moveSlide(i,i-1,true); }
+        if(e.key==='ArrowRight'){ e.preventDefault(); e.stopPropagation(); moveSlide(i,i+2,true); } });
+    }
+    strip.appendChild(t); s.th=t;
+  });
+  // Botón para agregar fotos en el momento
+  const add=document.createElement('label'); add.className='add';
+  add.innerHTML='+ Agregar fotos<br>(se suman antes del cierre)<input type="file" id="addInput" accept="image/*" multiple>';
+  strip.appendChild(add);
+  add.querySelector('input').onchange=e=>addFiles(e.target.files);
+  applyRot();
+  show(cur,true);
+}
+
+/* Muestra la diapositiva i con fundido y movimiento lento */
+function show(i, instant=false){
+  cur=Math.max(0,Math.min(slides.length-1,i));
+  slides.forEach((s,k)=>{
+    const on=k===cur;
+    if(on){
+      kbFlip=!kbFlip;
+      s.el.classList.remove('kb-in','kb-out'); void s.el.offsetWidth;   // reinicia la animación
+      s.el.classList.add(kbFlip?'kb-in':'kb-out');
+    }
+    s.el.classList.toggle('on',on);
+    s.th.setAttribute('aria-current',on);
+  });
+  if(instant) canvas.querySelectorAll('.slide').forEach(n=>{n.style.transition='none'; void n.offsetWidth; n.style.transition='';});
+  // En las placas no va el logo chico (ya está el grande)
+  $('bug').classList.toggle('off', !logoOn || slides[cur].type==='plate');
+  const nPhotos=slides.filter(s=>s.type==='photo').length;
+  const idx=slides.slice(0,cur+1).filter(s=>s.type==='photo').length;
+  const label = slides[cur].type==='plate' ? (cur===0?'Apertura':'Cierre') : `${idx} / ${nPhotos}`;
+  $('pos').textContent=label; $('hudPos').textContent=label;
+  slides[cur].th.scrollIntoView({block:'nearest',inline:'nearest'});
+  // Precarga la siguiente
+  const nx=slides[cur+1]; if(nx&&nx.src){ const im=new Image(); im.src=nx.src; }
+  if(autoOn) arm();
+}
+const go=i=>show(i);
+const next=()=>{ if(cur<slides.length-1) show(cur+1); else if(autoOn) toggleAuto(false); };
+const prev=()=>show(cur-1);
+
+/* Modo automático */
+function arm(){ clearTimeout(timer); timer=setTimeout(next, (+$('secs').value)*1000); }
+function toggleAuto(v=!autoOn){
+  autoOn=v; $('auto').setAttribute('aria-pressed',v); $('hudMode').textContent=v?'Automático':'Manual';
+  v?arm():clearTimeout(timer);
+}
+$('secs').oninput=()=>{ $('secsOut').textContent=$('secs').value+' s';
+  document.documentElement.style.setProperty('--kb',(+$('secs').value+3)+'s'); if(autoOn) arm(); };
+
+/* Logo en esquina y negro */
+let logoOn=true;
+function toggleLogo(){ logoOn=!logoOn; $('logoBtn').setAttribute('aria-pressed',logoOn); show(cur); }
+function toggleBlack(){ const on=!$('black').classList.contains('on'); $('black').classList.toggle('on',on); $('blackBtn').setAttribute('aria-pressed',on); }
+
+/* Pantalla completa (solo el escenario) */
+function full(){ const st=$('stage'); if(document.fullscreenElement) document.exitFullscreen(); else st.requestFullscreen?.().catch(()=>msg('Este navegador no permite pantalla completa acá. Abrí la página en una pestaña propia.')); }
+let idleT; $('stage').addEventListener('mousemove',()=>{ $('stage').classList.remove('idle'); clearTimeout(idleT); idleT=setTimeout(()=>$('stage').classList.add('idle'),1500); });
+$('stage').ondblclick=full;
+$('stage').onclick=e=>{ if(document.fullscreenElement) next(); };   // en pantalla completa, clic = siguiente
+
+/* Agregar fotos desde el equipo (se muestran enteras con fondo desenfocado) */
+function addFiles(files){
+  const nuevos=[...files].filter(f=>f.type.startsWith('image/')).map(f=>({type:'photo',src:URL.createObjectURL(f),fit:true,note:f.name}));
+  if(!nuevos.length) return;
+  slides.splice(slides.length-1,0,...nuevos);
+  build(); updInfo(); msg(`${nuevos.length} foto(s) agregada(s) antes del cierre. Se pierden si recargás la página.`);
+}
+const msg=t=>{ $('msg').textContent=t; };
+
+/* Botones y teclado (compatible con presentadores/clickers: flechas y PgUp/PgDn) */
+$('rotMax').oninput=()=>{ $('rotOut').textContent=$('rotMax').value+'°'; applyRot(); };
+$('rotShuffle').onclick=()=>{ rotSeed=(rotSeed+104729)%1000003; applyRot(); };
+$('resetOrder').onclick=resetOrder;
+$('next').onclick=next; $('prev').onclick=prev; $('auto').onclick=()=>toggleAuto();
+$('logoBtn').onclick=toggleLogo; $('blackBtn').onclick=toggleBlack; $('full').onclick=full;
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT') return;
+  const k=e.key;
+  if(k==='ArrowRight'||k===' '||k==='PageDown'){ e.preventDefault(); next(); }
+  else if(k==='ArrowLeft'||k==='PageUp'){ e.preventDefault(); prev(); }
+  else if(k==='Home') show(0);
+  else if(k==='End') show(slides.length-1);
+  else if(k==='a'||k==='A') toggleAuto();
+  else if(k==='f'||k==='F') full();
+  else if(k==='l'||k==='L') toggleLogo();
+  else if(k==='b'||k==='B'||k==='.') toggleBlack();
+});
+
+/* =====================================================================
+   3. RENDERIZADOR DE VIDEO
+   Dibuja cada cuadro en un canvas 1344×840 replicando el pasador
+   (fundido + acercamiento + logo) y lo codifica a MP4 con WebCodecs.
+   Si WebCodecs no está, graba en tiempo real con MediaRecorder.
+   ===================================================================== */
+const RW=1344, RH=840, FPS=30;
+const rc=document.createElement('canvas'); rc.width=RW; rc.height=RH; const rx=rc.getContext('2d');
+let downloads=null;
+(async()=>{ try{ downloads = window.claude?.use ? await window.claude.use('downloads') : null; }catch(e){} })();
+
+/* Paths del logo como Path2D, y logo negativo pre-renderizado (con filete calado) */
+const P2={top:new Path2D(PATHS.top),arc:new Path2D(PATHS.arc),word:new Path2D(PATHS.word),tag:new Path2D(PATHS.tag)};
+function logoCanvas(withText){
+  const c=document.createElement('canvas'); c.width=1375; c.height=375; const x=c.getContext('2d');
+  x.translate(-270,-355); x.fillStyle='#fff';
+  x.fill(P2.top);
+  x.globalCompositeOperation='destination-out'; x.lineWidth=26; x.lineJoin='round'; x.stroke(P2.arc); x.fill(P2.arc);
+  x.globalCompositeOperation='source-over'; x.fill(P2.arc);
+  if(withText){ x.fill(P2.word); x.fill(P2.tag); }
+  return c;
+}
+const LOGO_C=logoCanvas(true);
+
+/* Carga una imagen (devuelve HTMLImageElement listo para dibujar) */
+const imgCache=new Map();
+function loadImg(src){
+  if(imgCache.has(src)) return imgCache.get(src);
+  const p=new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=src; });
+  imgCache.set(src,p); return p;
+}
+
+/* Dibuja una diapositiva en el canvas con escala k (acercamiento) y opacidad a */
+function drawSlide(s, im, k, a, logo, rot={deg:0,scale:1}){
+  rx.save(); rx.globalAlpha=a;
+  if(s.type==='plate'){
+    const g=rx.createRadialGradient(RW/2,RH/2,0,RW/2,RH/2,Math.hypot(RW,RH)*.55);
+    g.addColorStop(0,'#00996b'); g.addColorStop(.55,'#015a40'); g.addColorStop(1,'#01291f');
+    rx.fillStyle=g; rx.fillRect(0,0,RW,RH);
+    const w=RW*.52, h=w*375/1375; rx.drawImage(LOGO_C,(RW-w)/2,(RH-h)/2,w,h);
+  } else {
+    // Acercamiento desde el punto de origen de la foto (ox/oy), igual que en pantalla
+    // Rotación leve (misma que en pantalla), alrededor del centro
+    rx.translate(RW/2,RH/2); rx.rotate(rot.deg*Math.PI/180); rx.scale(rot.scale,rot.scale); rx.translate(-RW/2,-RH/2);
+    const ox=parseFloat(s.ox||'50')/100*RW, oy=parseFloat(s.oy||'50')/100*RH;
+    rx.translate(ox,oy); rx.scale(k,k); rx.translate(-ox,-oy);
+    if(s.fit){
+      // Foto agregada: fondo desenfocado + foto entera con margen del 4%
+      rx.filter='blur(36px) brightness(.5)'; coverDraw(im,-40,-40,RW+80,RH+80); rx.filter='none';
+      rx.fillStyle='rgba(1,41,31,.45)'; rx.fillRect(0,0,RW,RH);
+      const sc=Math.min(RW*.92/im.width, RH*.92/im.height), w=im.width*sc, h=im.height*sc;
+      rx.drawImage(im,(RW-w)/2,(RH-h)/2,w,h);
+    } else coverDraw(im,0,0,RW,RH);
+    rx.setTransform(1,0,0,1,0,0);
+    if(logo){ const w=RW*.13, h=w*375/1375; rx.globalAlpha=a*.92; rx.shadowColor='rgba(0,0,0,.45)'; rx.shadowBlur=10; rx.drawImage(LOGO_C, RW-RW*.032-w, RH-RH*.045-h, w, h); }
+  }
+  rx.restore();
+}
+/* Dibuja una imagen cubriendo el rectángulo (como object-fit: cover) */
+function coverDraw(im,x,y,w,h){
+  const s=Math.max(w/im.width,h/im.height), iw=im.width*s, ih=im.height*s;
+  rx.drawImage(im, x+(w-iw)/2, y+(h-ih)/2, iw, ih);
+}
+
+/* Línea de tiempo del video: cada diapositiva dura 'dur'; el fundido se superpone con la siguiente */
+function timeline(){
+  const D=+$('rSecs').value, F=+$('rFade').value, DP=+$('rPlate').value;
+  const list=slides.filter(s=>$('rPlates').checked || s.type!=='plate');
+  const items=[]; let t=0;
+  list.forEach((s,i)=>{ const dur=s.type==='plate'?DP:D; items.push({s,start:t,dur}); t+=dur; });
+  return {items,total:t+F,F};   // +F: la última se funde a negro
+}
+function updInfo(){
+  const {items,total}=timeline(); const m=Math.floor(total/60), sec=Math.round(total%60);
+  $('rInfo').textContent=`${items.length} diapositivas · duración ${m}:${String(sec).padStart(2,'0')}`;
+}
+for(const id of ['rSecs','rFade','rPlate']){ $(id).oninput=()=>{ $(id+'Out').textContent=(+$(id).value)+' s'; updInfo(); }; }
+for(const id of ['rPlates','rLogo','rKB']) $(id).onchange=updInfo;
+
+/* Dibuja el cuadro del instante t: la diapositiva anterior plena y la entrante encima con fundido */
+function renderFrame2(t, TL, imgs){
+  rx.setTransform(1,0,0,1,0,0); rx.globalAlpha=1; rx.fillStyle='#000'; rx.fillRect(0,0,RW,RH);
+  const {items,F}=TL, kb=$('rKB').checked, logo=$('rLogo').checked;
+  // Índice actual = última diapositiva cuyo inicio ya pasó
+  let i=items.length-1; while(i>0 && t<items[i].start) i--;
+  const draw=(j,alpha)=>{ const it=items[j]; const local=t-it.start+F;      // cada una arranca a moverse cuando empieza a entrar
+    const p=Math.max(0,Math.min(1, local/(it.dur+2*F))), e=1-Math.pow(1-p,3);
+    const k= kb ? (j%2===0 ? 1+.04*e : 1.04-.04*e) : 1;
+    drawSlide(it.s, imgs[j], k, alpha, logo && it.s.type!=='plate', rotOf(slides.indexOf(it.s))); };
+  const it=items[i], local=t-it.start;
+  // Fundido de entrada de la actual sobre la anterior durante los primeros F segundos
+  if(i>0 && local<F){ draw(i-1,1); draw(i, local/F); }
+  else if(i===0 && local<F) draw(0, local/F);              // apertura desde negro
+  else draw(i,1);
+  // Salida final a negro
+  const end=it.start+it.dur;
+  if(i===items.length-1 && t>end){ rx.globalAlpha=Math.min(1,(t-end)/F); rx.fillStyle='#000'; rx.fillRect(0,0,RW,RH); rx.globalAlpha=1; }
+}
+
+let rendering=false, cancelR=false;
+$('rBtn').onclick=async()=>{
+  if(rendering){ cancelR=true; return; }
+  const TL=timeline(); if(!TL.items.length) return;
+  rendering=true; cancelR=false; $('rBtn').textContent='Cancelar'; $('rBar').style.width='0%';
+  try{
+    msg('Cargando fotos…');
+    const imgs=await Promise.all(TL.items.map(it=>it.s.type==='plate'?null:loadImg(it.s.src)));
+    const frames=Math.ceil(TL.total*FPS);
+    let blob, ext;
+    if(window.VideoEncoder && window.Mp4Muxer){ ({blob,ext}=await encodeWebCodecs(TL,imgs,frames)); }
+    else { ({blob,ext}=await encodeRealtime(TL,imgs,frames)); }
+    if(!blob){ msg('Render cancelado.'); return; }
+    await saveVideo(blob,`avalian_pasador_${Math.round(TL.total)}s.${ext}`);
+  }catch(e){ console.error(e); msg('No se pudo renderizar: '+(e.message||e)); }
+  finally{ rendering=false; $('rBtn').textContent='Renderizar MP4'; }
+};
+
+/* Codificación rápida con WebCodecs (H.264) + mp4-muxer */
+async function encodeWebCodecs(TL,imgs,frames){
+  const codecs=['avc1.640028','avc1.4d0028','avc1.42e028'];
+  let cfg=null;
+  for(const c of codecs){ const t={codec:c,width:RW,height:RH,bitrate:14e6,framerate:FPS};
+    if((await VideoEncoder.isConfigSupported(t)).supported){ cfg=t; break; } }
+  if(!cfg) return encodeRealtime(TL,imgs,frames);
+  const muxer=new Mp4Muxer.Muxer({ target:new Mp4Muxer.ArrayBufferTarget(), video:{codec:'avc',width:RW,height:RH}, fastStart:'in-memory' });
+  let err=null;
+  const enc=new VideoEncoder({ output:(chunk,meta)=>muxer.addVideoChunk(chunk,meta), error:e=>{err=e;} });
+  enc.configure(cfg);
+  for(let f=0; f<frames; f++){
+    if(cancelR){ enc.close(); return {}; }
+    if(err) throw err;
+    renderFrame2(f/FPS, TL, imgs);
+    const vf=new VideoFrame(rc,{timestamp:Math.round(f*1e6/FPS), duration:Math.round(1e6/FPS)});
+    enc.encode(vf,{keyFrame:f%(FPS*2)===0}); vf.close();
+    while(enc.encodeQueueSize>8) await new Promise(r=>setTimeout(r,0));   // contrapresión
+    if(f%15===0){ $('rBar').style.width=(f/frames*100).toFixed(1)+'%'; msg(`Renderizando… ${Math.round(f/frames*100)}%`); await new Promise(r=>setTimeout(r,0)); }
+  }
+  await enc.flush(); muxer.finalize();
+  $('rBar').style.width='100%';
+  return { blob:new Blob([muxer.target.buffer],{type:'video/mp4'}), ext:'mp4' };
+}
+
+/* Alternativa: grabación en tiempo real del canvas */
+async function encodeRealtime(TL,imgs,frames){
+  const mimes=['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm'];
+  const mime=mimes.find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m));
+  if(!mime) throw new Error('este navegador no puede generar video');
+  const rec=new MediaRecorder(rc.captureStream(FPS),{mimeType:mime,videoBitsPerSecond:14e6});
+  const chunks=[]; rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  const done=new Promise(r=>rec.onstop=r);
+  rec.start(500); const t0=performance.now();
+  await new Promise(resolve=>{
+    const tick=()=>{ const t=(performance.now()-t0)/1000;
+      if(cancelR||t>=TL.total){ resolve(); return; }
+      renderFrame2(t,TL,imgs); $('rBar').style.width=(t/TL.total*100).toFixed(1)+'%'; msg(`Grabando en tiempo real… ${Math.round(t/TL.total*100)}%`);
+      requestAnimationFrame(tick); };
+    tick(); });
+  rec.stop(); await done;
+  if(cancelR) return {};
+  return { blob:new Blob(chunks,{type:mime.split(';')[0]}), ext:mime.includes('mp4')?'mp4':'webm' };
+}
+
+/* Entrega el archivo: capacidad de descargas en Claude, o descarga directa fuera */
+async function saveVideo(blob,name){
+  if(downloads){
+    try{ await downloads.save({filename:name,data:blob}); msg('Video listo: '+name); }
+    catch(e){ msg(e?.code==='declined'?'Descarga cancelada.':'No se pudo guardar ('+(e?.code||'error')+').'); }
+  } else { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); msg('Video listo: '+name); }
+}
+
+loadOrder();
+build();
+updInfo();
+</script>
